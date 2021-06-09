@@ -9,6 +9,14 @@ import "core:path/filepath"
 // NOTE(rhett): filepath doesn't include a name proc
 import "core:path"
 
+// TODO(rhett): Figure out a better way of naming error vairables
+
+
+//----------------------------------------------------------------
+// Constants
+//----------------------------------------------------------------
+SHOW_DIRECTORY_ERRORS :: false;
+
 
 //----------------------------------------------------------------
 // Structures
@@ -52,13 +60,40 @@ read_value :: proc(reader: ^bytes.Reader, $T: typeid) -> T
     return (^T)(raw_data(buffer))^;
     }
 
+@(private)
+create_multiple_directories :: proc(elems: ..string) -> (output_path: string, success: bool)
+    {
+    for elem, _ in elems
+        {
+        if elem == ""
+            {
+            fmt.eprintln("Invalid directory element name.");
+            return "", false;
+            }
+
+        output_path = path.join(elems={output_path, elem});
+
+        // NOTE(rhett): 2nd return indicates if a new allocation was made
+        ok := os.make_directory(output_path, 0);
+        if ok == 0
+            {
+            when SHOW_DIRECTORY_ERRORS
+                {
+                // TODO(rhett): Figure out how to get the error code
+                fmt.eprintln("make_directory error:", ok);
+                }
+            }
+        }
+
+    return output_path, true;
+    }
+
 
 //----------------------------------------------------------------
 // Public Procedures
 //----------------------------------------------------------------
 load_pack_from_file :: proc(reader: ^bytes.Reader, buffer: []u8, pack_path: string) -> (pack: Pack, success: bool)
     {
-    // NOTE(rhett): 2nd return indicates if a new allocation was made
     clean_path, _ := filepath.to_slash(pack_path);
 
     buffer, ok := os.read_entire_file(clean_path);
@@ -102,6 +137,42 @@ load_pack_from_file :: proc(reader: ^bytes.Reader, buffer: []u8, pack_path: stri
     return pack, true;
     }
 
+unpack_pack_to_folder :: proc(pack: Pack, reader: ^bytes.Reader, output_folder: string) -> (success: bool)
+    {
+    output_folder_path, ok := create_multiple_directories(output_folder, pack.name);
+    if !ok
+        {
+        return;
+        }
+    defer delete(output_folder_path);
+
+    for a in pack.assets
+        {
+        asset_buffer := make([]u8, a.data_length);
+        output_asset_path := path.join(output_folder_path, a.name);
+        /*  FIXME(rhett):
+            This defer will cause odin to fail building
+                this file without giving any output.
+        */
+        // defer delete(asset_buffer);
+
+        bytes.reader_read_at(reader, asset_buffer, cast(i64)a.data_offset);
+        success := os.write_entire_file(output_asset_path, asset_buffer);
+        if !success
+            {
+            // NOTE(rhett): Let the OS handle cleanup
+            fmt.eprintln("Unable to write asset to file.");
+            return false;
+            }
+
+        // HACK(rhett): Workaround for Odin defer bug
+        delete(output_asset_path);
+        delete(asset_buffer);
+        }
+
+    return true;
+    }
+
 
 //----------------------------------------------------------------
 // Main Procedure
@@ -122,37 +193,12 @@ main :: proc()
         }
     defer delete(pack_buffer);
 
-    // TODO(rhett): I don't think it uses the 2nd(mode) argument?
-    err := os.make_directory(my_pack.name, 0);
-    if err == 0
+    fmt.println("Extracting assets...");
+    ok := unpack_pack_to_folder(my_pack, &pack_reader, "output");
+    if !ok
         {
-        fmt.eprintln("Unable to create output directory. May already exist.");
+        fmt.eprintln("Unable to extract assets from pack.");
+        return;
         }
-
-    fmt.println("Extracting assets.");
-    for a in my_pack.assets
-        {
-        asset_buffer := make([]u8, a.data_length);
-        /*  FIXME(rhett):
-            This defer will cause odin to fail building
-                this file without giving any output.
-        */
-        // defer delete(asset_buffer);
-
-        output_path := path.join(my_pack.name, a.name);
-
-        bytes.reader_read_at(&pack_reader, asset_buffer, cast(i64)a.data_offset);
-        success := os.write_entire_file(output_path, asset_buffer);
-        if !success
-            {
-            // NOTE(rhett): Let the OS handle cleanup
-            fmt.eprintln("Unable to write asset to file.");
-            return;
-            }
-
-        // HACK(rhett): Workaround for Odin defer bug
-        delete(asset_buffer);
-        }
-
     fmt.println("Extraction complete!");
     }
