@@ -9,6 +9,7 @@ import "core:path/filepath"
 // NOTE(rhett): filepath doesn't include a name proc
 import "core:path"
 
+// TODO(rhett): BIIIIIIG memory leak in here. FIX IT
 // TODO(rhett): Figure out a better way of naming error vairables
 
 
@@ -181,24 +182,29 @@ main :: proc()
     {
     example_path := `D:\WindowsUsers\Rhett\Desktop\PlanetSide 2 Beta\Resources\Assets\Assets_000.pack`;
 
-    fmt.println("Loading", example_path);
+    fmt.println(os.args[1:]);
 
-    pack_reader: bytes.Reader;
-    pack_buffer: []u8;
-    my_pack, success := load_pack_from_file(&pack_reader, pack_buffer, example_path);
-    if !success
+    for arg in os.args[1:]
         {
-        fmt.eprintln("Unable to load pack.");
-        return;
-        }
-    defer delete(pack_buffer);
+        fmt.println("Loading", arg);
 
-    fmt.println("Extracting assets...");
-    ok := unpack_pack_to_folder(my_pack, &pack_reader, "output");
-    if !ok
-        {
-        fmt.eprintln("Unable to extract assets from pack.");
-        return;
+        pack_reader: bytes.Reader;
+        pack_buffer: []u8;
+        my_pack, success := load_pack_from_file(&pack_reader, pack_buffer, arg);
+        if !success
+            {
+            fmt.eprintln("Unable to load pack.");
+            return;
+            }
+        defer delete(pack_buffer);
+
+        fmt.println("Extracting assets...");
+        ok := unpack_pack_to_folder(my_pack, &pack_reader, "output");
+        if !ok
+            {
+            fmt.eprintln("Unable to extract assets from pack.");
+            return;
+            }
+        fmt.println("Extraction complete!");
         }
-    fmt.println("Extraction complete!");
     }
